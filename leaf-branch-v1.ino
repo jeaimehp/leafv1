@@ -172,6 +172,8 @@ int rain = 0;
 ///////////////////////////
 
 void setup() {
+    // Wait for Wifi
+
     // Entering Setup console message
     Particle.publish("Entering Setup", "OK");
     delay(1000);
@@ -234,8 +236,8 @@ void setup() {
     
     //Initialize Rain Bucket Intterupt 
     pinMode(DRIP_SENSOR_PIN, INPUT_PULLUP); // Interrupt pin 
-    //attachInterrupt(DRIP_SENSOR_PIN, bucket_handler, FALLING);
-    Particle.variable("BucketCount", rain);
+    //attachInterrupt(DRIP_SENSOR_PIN, bucket_handler, RISING);
+    //Particle.variable("BucketCount", rain);
    
     //Initialize MPU9250
     Particle.publish("MPU9250_Setup", "Initializing");
@@ -251,7 +253,7 @@ void setup() {
     p1->writeRegister(REGISTER_CR0, CR0_INIT);
     p1->writeRegister(REGISTER_CR1, CR1_INIT);
     p1->writeRegister(REGISTER_MASK, MASK_INIT);
-  ;
+  
     delay(200);
     
     ///////////////////////////////
@@ -272,6 +274,15 @@ void setup() {
 
 void loop() {
 //Allows data collection to pause
+// Increment and reset from interrupt
+    unsigned long interrupt_time = millis();
+    if (interrupt_time - last_interrupt_time > DEBOUNCE_TIME && bucket_state == true) {
+       rain++;
+       Particle.publish("Rain Detected",String(rain));
+       bucket_state = false;
+       last_interrupt_time = interrupt_time;
+    }
+
 if (collect_data == 1){
     
 DynamicJsonBuffer jBuffer;
@@ -284,10 +295,9 @@ time_t time = Time.now();
 String timeStamp = Time.format(time, TIME_FORMAT_ISO8601_FULL);
 
 
-// Increment and reset from interrupt
-if (bucket_state == true){
-    rain++;
-    }
+
+    
+
     
     // Accel
     myIMU.readAccelData(myIMU.accelCount);
@@ -319,27 +329,30 @@ jsondata["bme_temp"] = leaf.bme_temp();
 jsondata["bme_rh"] = leaf.bme_rh();
 jsondata["bme_pressure"] = leaf.bme_p();
 jsondata["bme_altitude"] = leaf.bme_altitude();
-jsondata["ax"] = myIMU.ax;
-jsondata["ay"] = myIMU.ay;
-jsondata["az"] = myIMU.az;
+//jsondata["ax"] = myIMU.ax;
+//jsondata["ay"] = myIMU.ay;
+//jsondata["az"] = myIMU.az;
 jsondata["gx"] = myIMU.gx;
 jsondata["gy"] = myIMU.gy;
 jsondata["gz"] = myIMU.gz;
+jsondata["rain_tip"] = rain;
 jsondata["imu_temp"] = myIMU.temperature;
 jsondata["sapfluxjc"] = p1->readJunction(CELSIUS);
 jsondata["sapfluxtc"] = p1->readThermocouple(CELSIUS);
-delay(100);
-jsondata["rain_tip"] = rain;
 
 
 
 
-String data;
-jsondata.printTo(data);
-Particle.publish("Data",data);
 
+String data = jsondata[String("bme_temp")];
+String fulldata;
+jsondata.printTo(fulldata); 
+//jsondata.printTo(data);
+
+//Particle.publish("Data",data, PRIVATE);
+delay(1500);
+Particle.publish("Full Data",fulldata);
 if (rain > 0){
-    //attachInterrupt(DRIP_SENSOR_PIN, bucket_handler, RISING);
     rain = 0;
 }
 
@@ -428,10 +441,8 @@ int data_setting(String setting){
 
 // Interrupt handler for drip bucket
 void bucket_handler() {
-    unsigned long interrupt_time = millis();
-    if (interrupt_time - last_interrupt_time > DEBOUNCE_TIME) {
-       bucket_state = true;
-       //detachInterrupt(DRIP_SENSOR_PIN);
-    }
-    last_interrupt_time = interrupt_time; 
+    bucket_state = true; 
 }
+
+
+
