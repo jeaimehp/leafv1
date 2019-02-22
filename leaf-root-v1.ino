@@ -1,9 +1,25 @@
+// This #include statement was automatically added by the Particle IDE.
+#include <DS18B20.h>
+
+// This #include statement was automatically added by the Particle IDE.
+//#include <SparkFun_MPU-9250.h>
+
+// This #include statement was automatically added by the Particle IDE.
+#include <SparkFunBME280.h>
+
+// This #include statement was automatically added by the Particle IDE.
+#define ARDUINOJSON_ENABLE_ARDUINO_STRING 1
+#include <ArduinoJson.h>
+
+// This #include statement was automatically added by the Particle IDE.
+#include <MAX31856TC.h>
+
 /************************************
- * LEAF Branch v.1 
+ * LEAF Root v.1 
  * Designed for Particle Argon  
  * Maintained by: Je'aime Powell
  * Contact: jeaimehp@gmail.com
- * Initally Coded: 02/13/19
+ * Initally Coded: 02/22/19
  ***********************************/
  
 /**********************************
@@ -21,6 +37,7 @@
   *     - SCL -  1 [SCL] *Not Used
   *     - SDA -  0 [SDA] *Not USed
   * 
+  * 
   * Tipping Bucket (Reed Switch) (3.3v)
   *     - D4 - INPUT_PULLUP pinmode
   * 
@@ -36,15 +53,28 @@
   *     - SDO - D11 [MISO]
   *     - CS - A5 [SS]
   * 
-  * Accelerometer/Gyroscope/Magnetometer (3.3v & GND)
-  * -- HiLetgo MPU-9250 - 0x68
-  *     - SCL -  1 [SCL] 
-  *     - SDA -  0 [SDA]
   * 
   * Temperature/Humidity/Pressure (3.3v & GND
   * -- BME280 - 0x76
   *     - SCL -  1 [SCL] 
   *     - SDA -  0 [SDA]
+  * 
+  * Turbidity
+  *     - SIG - A4 
+  * 
+  * 
+  * DS18B20 - Water Temp
+  *     - SIG (4.7K Ohm Sig to 5v) - D2
+  * 
+  * 
+  * Soil Moisture 
+  *     - SIG 1 - A2
+  *     - SIG 2 - A3
+  * 
+  * 
+  * Pressure Sensor
+  *     - SIG - A1
+  * 
   * ******************************/
 
 
@@ -53,18 +83,18 @@
 ///////////////////////////
 
 // This #include statement was automatically added by the Particle IDE.
-    #include <MAX31856TC.h>
+//   #include <MPU9250.h>
+//#include <SparkFun_MPU-9250.h> //<-- Was the incorrect .h file name 
 
 // This #include statement was automatically added by the Particle IDE.
-    #define ARDUINOJSON_ENABLE_ARDUINO_STRING 1
-    #include <ArduinoJson.h>
+#include <SparkFunBME280.h>
 
 // This #include statement was automatically added by the Particle IDE.
-    #include <SparkFunBME280.h>
+#define ARDUINOJSON_ENABLE_ARDUINO_STRING 1
+#include <ArduinoJson.h>
 
 // This #include statement was automatically added by the Particle IDE.
-    #include <MPU9250.h>
-
+#include <MAX31856TC.h>
 
 //-------------------------------------------------------//
 
@@ -94,11 +124,26 @@
     MAX31856TC* p1;
     //MAX31856TC* p2;
     
-// MPU9250 (Accl/Gyro/Mag) Specific Definitions
-    MPU9250 myIMU;
-// T/RH/P BME280 I2C Definition
+    // MPU9250 (Accl/Gyro/Mag) Specific Definitions
+    //   MPU9250 myIMU;
+
+// T/RH/P BME280 I2C Object Definition
     BME280 t_rh_p_bme;
  
+ 
+// Digital Temp DS18B20 Water 
+    #define DS18B20PIN D2
+    DS18B20  ds18b20(DS18B20PIN, true);
+
+// Pressure Definition
+    #define WATER_PRESSURE A1
+
+// Soil Moisture 1 Definition
+    #define Soil_Moisture_1 A2
+
+// Soil Moisture 2 Definition
+    #define Soil_Moisture_2 A3
+
 //-------------------------------------------------------//
  
  
@@ -108,7 +153,9 @@
 class leafSENSORS{
      private:
         // Variables local to class
-        
+        float _temp, celsius;
+        int   i = 0;
+        int MAXRETRY = 4;
      public:
         // Sensor Function Calls
         
@@ -130,10 +177,32 @@ class leafSENSORS{
         double bme_altitude(){
             return t_rh_p_bme.readFloatAltitudeFeet();
         }
-        
-        
+        //-------DS18B20 Water Temp----------//
+        float w_temp(){
+            do {
+             _temp = ds18b20.getTemperature();
+            } while (!ds18b20.crcCheck() && MAXRETRY > i++);
+            if (i < MAXRETRY) {
+                celsius = _temp;
+            }
+            else {
+                celsius = 0;
+            }
+            return celsius;        
+        }
+        //-------Water Pressure----------//
+        float w_pressure(){
+            return analogRead(WATER_PRESSURE);
+        }
+        //-------Soil Moisture 1----------//
+        float soilmoisture_1(){
+            return analogRead(Soil_Moisture_1);
+        }
+        //-------Soil Moisture 2----------//
+        float soilmoisture_2(){
+            return analogRead(Soil_Moisture_2);
+        }
 };
-
 
 
 
@@ -141,7 +210,7 @@ class leafSENSORS{
 ///////////////////////////
 // Global Objects
 ///////////////////////////
-    leafSENSORS leaf;
+leafSENSORS leaf;
 
 
     // Setting to automatically collect
@@ -177,7 +246,8 @@ void setup() {
     // Entering Setup console message
     Particle.publish("Entering Setup", "OK");
     delay(1000);
-     //Pin Relays Control 3.3v and 5v to Sensors
+    
+     //Pin Relays Control 3.3v to Sensors
     pinMode(power3_3v, OUTPUT);
     Particle.publish("Power Relays Setup", "OK");
     delay(2000);
@@ -240,19 +310,31 @@ void setup() {
 
    
     //Initialize MPU9250
-    Particle.publish("MPU9250_Setup", "Initializing");
-    myIMU.initMPU9250();
-    Particle.publish("MPU9250_Setup", "OK");
+    //Particle.publish("MPU9250_Setup", "Initializing");
+    //myIMU.initMPU9250();
+    //Particle.publish("MPU9250_Setup", "OK");
 
     // Initialize MAX31856
     // Define the pins used to communicate with the MAX31856
     p1 = new MAX31856TC(CS1);
-
   
     // Initializing the MAX31856's registers
     p1->writeRegister(REGISTER_CR0, CR0_INIT);
     p1->writeRegister(REGISTER_CR1, CR1_INIT);
     p1->writeRegister(REGISTER_MASK, MASK_INIT);
+    
+    // DS18B20 Pin setup
+    pinMode(DS18B20PIN,INPUT_PULLDOWN);
+    
+    //Water Pressure
+    pinMode(WATER_PRESSURE,INPUT); 
+    
+    //Soil Moisture 1
+    pinMode(Soil_Moisture_1,INPUT); 
+    
+    //Soil Moisture 2
+    pinMode(Soil_Moisture_2,INPUT); 
+    
   
     delay(200);
     
@@ -296,7 +378,7 @@ void loop() {
     
         DynamicJsonBuffer jBuffer;
         JsonObject& jsondata = jBuffer.createObject();
-        JsonObject& jsonmov = jBuffer.createObject();
+        JsonObject& jsonwater = jBuffer.createObject();
 
 
         // Timestamp
@@ -306,27 +388,27 @@ void loop() {
         String timeStamp = Time.format(time, TIME_FORMAT_ISO8601_FULL);
 
         // Accelerometer 
-        myIMU.readAccelData(myIMU.accelCount);
-        myIMU.getAres();
+        //myIMU.readAccelData(myIMU.accelCount);
+        //myIMU.getAres();
 
         // Now we'll calculate the accleration value into actual g's
         // This depends on scale being set
-        myIMU.ax = (float)myIMU.accelCount[0]*myIMU.aRes; // - accelBias[0];
-        myIMU.ay = (float)myIMU.accelCount[1]*myIMU.aRes; // - accelBias[1];
-        myIMU.az = (float)myIMU.accelCount[2]*myIMU.aRes; // - accelBias[2];
+        //myIMU.ax = (float)myIMU.accelCount[0]*myIMU.aRes; // - accelBias[0];
+        //myIMU.ay = (float)myIMU.accelCount[1]*myIMU.aRes; // - accelBias[1];
+        //myIMU.az = (float)myIMU.accelCount[2]*myIMU.aRes; // - accelBias[2];
 
-        myIMU.readGyroData(myIMU.gyroCount);  // Read the x/y/z adc values
-        myIMU.getGres();
+        //myIMU.readGyroData(myIMU.gyroCount);  // Read the x/y/z adc values
+        //myIMU.getGres();
 
         // Calculate the gyro value into actual degrees per second
         // This depends on scale being set
-        myIMU.gx = (float)myIMU.gyroCount[0]*myIMU.gRes;
-        myIMU.gy = (float)myIMU.gyroCount[1]*myIMU.gRes;
-        myIMU.gz = (float)myIMU.gyroCount[2]*myIMU.gRes;
+        //myIMU.gx = (float)myIMU.gyroCount[0]*myIMU.gRes;
+        //myIMU.gy = (float)myIMU.gyroCount[1]*myIMU.gRes;
+        //myIMU.gz = (float)myIMU.gyroCount[2]*myIMU.gRes;
     
-        myIMU.tempCount = myIMU.readTempData();  // Read the adc values
+        //myIMU.tempCount = myIMU.readTempData();  // Read the adc values
         // Temperature in degrees Centigrade
-        myIMU.temperature = ((float) myIMU.tempCount) / 333.87 + 21.0;
+        //myIMU.temperature = ((float) myIMU.tempCount) / 333.87 + 21.0;
 
         // Pulls the Thermocouple Temperature in C
         double sapfluxC = p1->readJunction(CELSIUS);
@@ -340,19 +422,17 @@ void loop() {
         jsondata["bme_pressure"] = leaf.bme_p();
         jsondata["bme_altitude"] = leaf.bme_altitude();
         jsondata["rain_tip"] = bucket_state;
-        jsondata["imu_temp"] = myIMU.temperature;
         jsondata["sapfluxjc"] = sapfluxC;
         jsondata["sapfluxmv"] = sapfluxmV;
-        jsonmov["at"] = timeStamp;
         jsondata["at"] = timeStamp;
 
-        //JSON Movement Data 
-        jsonmov["ax"] = myIMU.ax;
-        jsonmov["ay"] = myIMU.ay;
-        jsonmov["az"] = myIMU.az;
-        jsonmov["gx"] = myIMU.gx;
-        jsonmov["gy"] = myIMU.gy;
-        jsonmov["gz"] = myIMU.gz;
+        //JSON Water Data
+        jsonwater["w_temp"] = leaf.w_temp();
+        jsonwater["w_pressure"] = leaf.w_pressure();
+        jsonwater["soilmoisture_1"] = leaf.soilmoisture_1();
+        jsonwater["soilmoisture_2"] = leaf.soilmoisture_2();
+        jsonwater["at"] = timeStamp;
+        
 
         // fulldata event Creation
         String fulldata;
@@ -360,10 +440,10 @@ void loop() {
         Particle.publish("Full Data",fulldata);
         delay(1500);
 
-        // movdata event creation
-        String movdata;
-        jsonmov.printTo(movdata);
-        Particle.publish("Move Data",movdata);
+        // waterdata event creation
+        String waterdata;
+        jsonwater.printTo(waterdata);
+        Particle.publish("Water Data",waterdata);
         delay(1000);
 
         // Bucket Count Reset
