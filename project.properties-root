@@ -1,0 +1,5 @@
+dependencies.MAX31856TC=0.0.30
+dependencies.ArduinoJson=5.13.4
+dependencies.SparkFunBME280=1.1.2
+dependencies.SparkFun_MPU-9250=1.0.0
+dependencies.DS18B20=0.1.9
