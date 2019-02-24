@@ -1,3 +1,18 @@
+// This #include statement was automatically added by the Particle IDE.
+#include <DS18B20.h>
+
+// This #include statement was automatically added by the Particle IDE.
+//#include <SparkFun_MPU-9250.h>
+
+// This #include statement was automatically added by the Particle IDE.
+#include <SparkFunBME280.h>
+
+// This #include statement was automatically added by the Particle IDE.
+#define ARDUINOJSON_ENABLE_ARDUINO_STRING 1
+#include <ArduinoJson.h>
+
+// This #include statement was automatically added by the Particle IDE.
+#include <MAX31856TC.h>
 
 /************************************
  * LEAF Root v.1 
@@ -68,11 +83,8 @@
 ///////////////////////////
 
 // This #include statement was automatically added by the Particle IDE.
-#include <SPI.h>
-#include <SdFat.h>
-
-// This #include statement was automatically added by the Particle IDE.
-#include <DS18B20.h>
+//   #include <MPU9250.h>
+//#include <SparkFun_MPU-9250.h> //<-- Was the incorrect .h file name 
 
 // This #include statement was automatically added by the Particle IDE.
 #include <SparkFunBME280.h>
@@ -99,16 +111,21 @@
 // Relay Channel 1 (3.3v Power to Sensors)
     #define power3_3v D6
  
+
 // MAX31856 Thermocouple
-    #define CS1  A5 //CS of Thermocouple ADC
+    #define CS1  A5
 
-
-    #define CR0_INIT 0x88 // Linearized Temperature Low Fault Threshold LSB
+    // The default noise filter is 60Hz, suitable for the USA
+    #define CR0_INIT  (CR0_AUTOMATIC_CONVERSION + CR0_OPEN_CIRCUIT_FAULT_TYPE_K /* + CR0_NOISE_FILTER_50HZ */)
     // Thermocouple supported types found in MAX31856TC Library .h file
-    #define CR1_INIT  0x07 // T-Type Therocouple 
+    #define CR1_INIT  (CR1_AVERAGE_2_SAMPLES + CR1_THERMOCOUPLE_TYPE_T)
     #define MASK_INIT (~(MASK_VOLTAGE_UNDER_OVER_FAULT + MASK_THERMOCOUPLE_OPEN_FAULT))
     
     MAX31856TC* p1;
+    //MAX31856TC* p2;
+    
+    // MPU9250 (Accl/Gyro/Mag) Specific Definitions
+    //   MPU9250 myIMU;
 
 // T/RH/P BME280 I2C Object Definition
     BME280 t_rh_p_bme;
@@ -126,10 +143,6 @@
 
 // Soil Moisture 2 Definition
     #define Soil_Moisture_2 A3
-    
-// Adalogger SDCArd CS 
-    // SD chip select pin
-    const uint8_t chipSelect = D5;
 
 //-------------------------------------------------------//
  
@@ -200,7 +213,6 @@ class leafSENSORS{
 leafSENSORS leaf;
 
 
-
     // Setting to automatically collect
     // data on power on 
     // 1 = Yes, do collect data
@@ -209,7 +221,7 @@ leafSENSORS leaf;
 
 // Tipping Bucket
     volatile int bucket_state = 0;
-    const unsigned int DEBOUNCE_TIME = 1000;
+    const unsigned int DEBOUNCE_TIME = 1500;
     static unsigned long last_interrupt_time = 0;
     int rain = 0;
 
@@ -219,13 +231,6 @@ leafSENSORS leaf;
     unsigned long lastSync = millis();
     
     String mydevID = System.deviceID();
-    
-// SD Card File Object
-    // file system
-    SdFat sd;
-
-    // test file
-    SdFile myFile;
 
 //-------------------------------------------------------//
 
@@ -292,7 +297,6 @@ void setup() {
 ;
 	if (!t_rh_p_bme.begin()){
         Particle.publish("BME_Setup", "BME Failed");
-        Particle.publish("ALERT", "BME280_Failure!");
     }
     else{
         Particle.publish("BME_Setup", "OK"); 
@@ -305,39 +309,32 @@ void setup() {
     attachInterrupt(DRIP_SENSOR_DETECT, bucket_handler, FALLING);
 
    
-    //Initialize SD Card
-    Particle.publish("SDCard Logger", "Initializing");
-    delay(1000);
-     if (!sd.begin(chipSelect)){
-         Particle.publish("SDCard Logger", "Failed");
-         //jsonsensor["SDCard"] = "FAILED";
-         delay(1000);
-         Particle.publish("ALERT", "SDCard_Failure!");
-     }
-     else {
-            Particle.publish("SDCard Logger", "OK");
-            //jsonsensor["SDCard"] = "OK";
-            delay(1000);
-    }
-
-
+    //Initialize MPU9250
+    //Particle.publish("MPU9250_Setup", "Initializing");
+    //myIMU.initMPU9250();
+    //Particle.publish("MPU9250_Setup", "OK");
 
     // Initialize MAX31856
     // Define the pins used to communicate with the MAX31856
     p1 = new MAX31856TC(CS1);
+  
     // Initializing the MAX31856's registers
     p1->writeRegister(REGISTER_CR0, CR0_INIT);
     p1->writeRegister(REGISTER_CR1, CR1_INIT);
     p1->writeRegister(REGISTER_MASK, MASK_INIT);
     
-    // Ensures the Cold Junction is cleared
-    digitalWrite(A5, LOW);
-    SPI.transfer(0x0A);
-    SPI.transfer(0x00);
-    SPI.transfer(0x00);
-    digitalWrite(A5, HIGH);
-    Particle.publish("MAX31856TC", "Initialized");
-    //jsonsensor["MAX318TC"] = "INITIALIZED";
+    // DS18B20 Pin setup
+    pinMode(DS18B20PIN,INPUT_PULLDOWN);
+    
+    //Water Pressure
+    pinMode(WATER_PRESSURE,INPUT); 
+    
+    //Soil Moisture 1
+    pinMode(Soil_Moisture_1,INPUT); 
+    
+    //Soil Moisture 2
+    pinMode(Soil_Moisture_2,INPUT); 
+    
   
     delay(200);
     
@@ -353,32 +350,6 @@ void setup() {
     // Send Sitrep
     delay(1000);
     dev_status("phone home");
-    
-    //Set SPI to correct mode to write to the SD Card
-    SPI.setDataMode(SPI_MODE0);
-    // open the file for write at end like the "Native SD library"
-    if (!myFile.open("startup.txt", O_RDWR | O_CREAT | O_AT_END)) {
-        //sd.errorHalt("opening startup.log for write failed");
-        Particle.publish("SDCard_Setup", "SD Card startup.txt init failed");
-        Particle.publish("ALERT", "SD Card startup.txt init failed");
-    }
-    else {
-        // if the file opened okay, write to it:
-        Time.zone(0);
-        time_t time = Time.now();
-        String timeStamp = Time.format(time, TIME_FORMAT_ISO8601_FULL);
-        myFile.println("////////////////SD Card initialized///////////////////");
-        myFile.printf(timeStamp,"\n");
-        myFile.printf("fileSize: %d\n", myFile.fileSize());
-        myFile.printf("Device ID ",mydevID,"\n");
-        myFile.printf("[--------------------------------------------------]\n");
-  
-         // close the file:
-        myFile.close();
-        }    
-    
-    
-    
     
     // Exiting Setup console message
     delay(5000);
@@ -416,10 +387,31 @@ void loop() {
         time_t time = Time.now();
         String timeStamp = Time.format(time, TIME_FORMAT_ISO8601_FULL);
 
+        // Accelerometer 
+        //myIMU.readAccelData(myIMU.accelCount);
+        //myIMU.getAres();
+
+        // Now we'll calculate the accleration value into actual g's
+        // This depends on scale being set
+        //myIMU.ax = (float)myIMU.accelCount[0]*myIMU.aRes; // - accelBias[0];
+        //myIMU.ay = (float)myIMU.accelCount[1]*myIMU.aRes; // - accelBias[1];
+        //myIMU.az = (float)myIMU.accelCount[2]*myIMU.aRes; // - accelBias[2];
+
+        //myIMU.readGyroData(myIMU.gyroCount);  // Read the x/y/z adc values
+        //myIMU.getGres();
+
+        // Calculate the gyro value into actual degrees per second
+        // This depends on scale being set
+        //myIMU.gx = (float)myIMU.gyroCount[0]*myIMU.gRes;
+        //myIMU.gy = (float)myIMU.gyroCount[1]*myIMU.gRes;
+        //myIMU.gz = (float)myIMU.gyroCount[2]*myIMU.gRes;
+    
+        //myIMU.tempCount = myIMU.readTempData();  // Read the adc values
+        // Temperature in degrees Centigrade
+        //myIMU.temperature = ((float) myIMU.tempCount) / 333.87 + 21.0;
+
         // Pulls the Thermocouple Temperature in C
-        // Changes to the proper mode for the MAX31856
-        SPI.setDataMode(SPI_MODE1);
-        double sapfluxC = p1->readThermocouple(CELSIUS);
+        double sapfluxC = p1->readJunction(CELSIUS);
 
         // Formula to convert T-Type Thermocouple to mV
         double sapfluxmV = 0.00004*pow(sapfluxC, 2) + 0.0386*sapfluxC + 0.0007;
@@ -430,9 +422,6 @@ void loop() {
         jsondata["bme_pressure"] = leaf.bme_p();
         jsondata["bme_altitude"] = leaf.bme_altitude();
         jsondata["rain_tip"] = bucket_state;
-         
-         // Bucket Count Reset
-        bucket_state = 0;
         jsondata["sapfluxjc"] = sapfluxC;
         jsondata["sapfluxmv"] = sapfluxmV;
         jsondata["at"] = timeStamp;
@@ -457,27 +446,13 @@ void loop() {
         Particle.publish("Water Data",waterdata);
         delay(1000);
 
-
- // SD Card Loggin of data
-        //Set SPI to correct mode to write to the SD Card
-        SPI.setDataMode(SPI_MODE0);
-        String data_file_name = mydevID + Time.format(Time.now(), "%F") + ".log";
-        if (!myFile.open(data_file_name, O_RDWR | O_CREAT | O_AT_END)) {
-            Particle.publish("SDCard_Write", "SD Card data_file_name failed");
-            Particle.publish("ALERT", "SD Card data_file_name init failed");
-            
-        }
-        else{
-            myFile.println(fulldata);
-            myFile.println(waterdata);
-            myFile.close();
-        }
-
+        // Bucket Count Reset
+        bucket_state = 0;
 
         // Delay until next read
         delay(7000);
         //Reattaching Intterupt Post trip
-        //attachInterrupt(DRIP_SENSOR_DETECT, bucket_handler, FALLING);
+        attachInterrupt(DRIP_SENSOR_DETECT, bucket_handler, FALLING);
     } // End Data Collection "If" switch  
 
 }
@@ -598,12 +573,8 @@ int dev_status(String blah){
 
 // Interrupt handler for drip bucket
 void bucket_handler() {
-    unsigned long interrupt_time = micros();
-    if (interrupt_time - last_interrupt_time > DEBOUNCE_TIME) {
+    detachInterrupt(DRIP_SENSOR_DETECT);
     bucket_state++;
-    }
-    last_interrupt_time = interrupt_time; 
-    
     }
 
 
